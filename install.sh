@@ -70,9 +70,45 @@ setup_directories() {
 # 下载并安装主脚本
 install_main_script() {
     echo -e "${GREEN}正在下载并安装主脚本...${NC}"
-    # 下载主脚本
-    curl -fsSL https://raw.githubusercontent.com/oliver556/SSL-Renewal/main/ssl-manager -o /usr/local/bin/ssl-manager
+    
+    # 创建临时目录
+    TEMP_DIR=$(mktemp -d)
+    echo -e "${YELLOW}使用临时目录: $TEMP_DIR${NC}"
+    
+    # 下载主脚本到临时目录
+    echo -e "${YELLOW}正在下载脚本...${NC}"
+    if ! curl -v -fsSL https://raw.githubusercontent.com/oliver556/SSL-Renewal/main/ssl-manager -o "$TEMP_DIR/ssl-manager"; then
+        echo -e "${RED}下载主脚本失败，请检查网络连接或仓库地址是否正确${NC}"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    # 检查文件是否下载成功
+    if [ ! -f "$TEMP_DIR/ssl-manager" ]; then
+        echo -e "${RED}下载的文件不存在${NC}"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    # 显示文件信息
+    echo -e "${YELLOW}下载的文件信息:${NC}"
+    ls -l "$TEMP_DIR/ssl-manager"
+    
+    # 移动文件到目标位置
+    echo -e "${YELLOW}正在安装脚本...${NC}"
+    if ! mv "$TEMP_DIR/ssl-manager" /usr/local/bin/ssl-manager; then
+        echo -e "${RED}移动文件失败${NC}"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    # 设置权限
     chmod +x /usr/local/bin/ssl-manager
+    
+    # 清理临时目录
+    rm -rf "$TEMP_DIR"
+    
+    echo -e "${GREEN}主脚本安装成功${NC}"
 }
 
 # 主安装流程
