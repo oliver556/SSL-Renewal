@@ -1,0 +1,223 @@
+#!/bin/bash
+set -e
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# 证书存放目录
+CERT_DIR="/etc/ssl/certs"
+PRIVATE_DIR="/etc/ssl/private"
+DOMAIN_DIR="/etc/ssl/domains"
+
+# 检查是否为 root 用户
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${RED}请使用 root 权限运行此脚本${NC}"
+        exit 1
+    fi
+}
+
+# 检查并创建必要的目录
+setup_directories() {
+    mkdir -p "$CERT_DIR" "$PRIVATE_DIR" "$DOMAIN_DIR"
+    chmod 755 "$CERT_DIR"
+    chmod 700 "$PRIVATE_DIR"
+    chmod 755 "$DOMAIN_DIR"
+}
+
+# 检查 UFW 是否安装
+check_ufw() {
+    if command -v ufw &> /dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# 防火墙管理
+manage_firewall() {
+    if check_ufw; then
+        read -p "是否需要关闭防火墙？(y/n): " disable_fw
+        if [[ $disable_fw == "y" ]]; then
+            ufw disable
+            echo -e "${GREEN}防火墙已关闭${NC}"
+        else
+            read -p "是否需要放行特定端口？(y/n): " allow_port
+            if [[ $allow_port == "y" ]]; then
+                read -p "请输入需要放行的端口（多个端口用空格分隔）: " ports
+                for port in $ports; do
+                    ufw allow $port/tcp
+                done
+                echo -e "${GREEN}端口已放行${NC}"
+            fi
+        fi
+    else
+        echo -e "${YELLOW}未检测到 UFW 防火墙，跳过防火墙配置${NC}"
+    fi
+}
+
+# 申请证书
+request_certificate() {
+    echo -e "\n${GREEN}=== 申请SSL证书 ===${NC}"
+    read -p "请输入域名: " domain
+    read -p "请输入电子邮箱地址: " email
+
+    echo -e "\n请选择证书颁发机构："
+    echo "1) Let's Encrypt"
+    echo "2) Buypass"
+    echo "3) ZeroSSL"
+    read -p "请选择 (1-3): " ca_choice
+
+    # 创建域名配置目录
+    domain_config_dir="$DOMAIN_DIR/$domain"
+    mkdir -p "$domain_config_dir"
+
+    # 设置CA服务器
+    case $ca_choice in
+        1) ca_server="letsencrypt" ;;
+        2) ca_server="buypass" ;;
+        3) ca_server="zerossl" ;;
+        *)
+            echo -e "${RED}无效的选择${NC}"
+            return 1
+            ;;
+    esac
+
+    # 注册账户
+    echo -e "${GREEN}正在注册账户...${NC}"
+    ~/.acme.sh/acme.sh --register-account -m "$email" --server "$ca_server"
+
+    # 申请证书
+    echo -e "${GREEN}正在申请证书...${NC}"
+    if ! ~/.acme.sh/acme.sh --issue --standalone -d "$domain" --server "$ca_server"; then
+        echo -e "${RED}证书申请失败，正在清理...${NC}"
+        
+        # 清理证书文件
+        rm -f "$PRIVATE_DIR/${domain}.key" "$CERT_DIR/${domain}.crt"
+        
+        # 清理acme.sh中的记录
+        ~/.acme.sh/acme.sh --remove -d "$domain"
+        rm -rf ~/.acme.sh/"${domain}"
+        
+        # 清理域名配置目录
+        rm -rf "$domain_config_dir"
+        
+        # 清理crontab中的续期任务
+        crontab -l 2>/dev/null | grep -v "$domain_config_dir/renew.sh" | crontab -
+        
+        echo -e "${YELLOW}是否要重试申请证书？(y/n)${NC}"
+        read -p "请选择 (y/n): " retry
+        if [[ $retry == "y" ]]; then
+            echo -e "${GREEN}重新开始申请流程...${NC}"
+            request_certificate
+            return 0
+        else
+            echo -e "${YELLOW}已取消申请${NC}"
+            return 1
+        fi
+    fi
+
+    # 安装证书
+    echo -e "${GREEN}正在安装证书...${NC}"
+    ~/.acme.sh/acme.sh --installcert -d "$domain" \
+        --key-file "$PRIVATE_DIR/${domain}.key" \
+        --fullchain-file "$CERT_DIR/${domain}.crt"
+
+    # ===== 自动续期配置开始 =====
+    # 为每个域名创建独立的续期脚本
+    # 续期脚本将使用acme.sh的renew命令来更新证书
+    # 脚本位置：/etc/ssl/domains/<domain>/renew.sh
+    cat << EOF > "$domain_config_dir/renew.sh"
+#!/bin/bash
+# 自动续期脚本
+# 功能：使用acme.sh更新指定域名的SSL证书
+# 参数：
+#   - domain: 域名
+#   - ca_server: 证书颁发机构
+# 续期机制：
+#   - 每天检查一次证书状态
+#   - 当证书剩余有效期小于30天时自动续期
+#   - 续期日志保存在系统日志中
+
+# 设置acme.sh环境
+export PATH="\$HOME/.acme.sh:\$PATH"
+
+# 执行续期
+# --renew: 续期命令
+# -d: 指定域名
+# --server: 指定证书颁发机构
+# --days: 指定在证书到期前多少天进行续期（默认30天）
+acme.sh --renew -d $domain --server $ca_server --days 30
+
+# 记录续期日志
+echo "\$(date '+%Y-%m-%d %H:%M:%S') - 执行证书续期检查" >> /var/log/ssl-renewal.log
+EOF
+    chmod +x "$domain_config_dir/renew.sh"
+
+    # 添加到crontab实现自动续期
+    # 每天0点检查一次是否需要续期
+    # 续期日志保存在系统日志中
+    (crontab -l 2>/dev/null; echo "0 0 * * * $domain_config_dir/renew.sh > /dev/null 2>&1") | crontab -
+    # ===== 自动续期配置结束 =====
+
+    # 保存申请记录
+    echo "Domain: $domain" > "$domain_config_dir/config"
+    echo "Email: $email" >> "$domain_config_dir/config"
+    echo "CA: $ca_server" >> "$domain_config_dir/config"
+    echo "Request Date: $(date)" >> "$domain_config_dir/config"
+
+    echo -e "${GREEN}证书申请完成！${NC}"
+    echo -e "证书路径: ${YELLOW}$CERT_DIR/${domain}.crt${NC}"
+    echo -e "私钥路径: ${YELLOW}$PRIVATE_DIR/${domain}.key${NC}"
+    echo -e "续期脚本: ${YELLOW}$domain_config_dir/renew.sh${NC}"
+    echo -e "续期时间: ${YELLOW}每天0点自动检查${NC}"
+}
+
+# 重置环境
+reset_environment() {
+    echo -e "\n${YELLOW}=== 重置环境 ===${NC}"
+    read -p "确定要清除所有申请记录并重新部署吗？(y/n): " confirm
+    if [[ $confirm == "y" ]]; then
+        rm -rf "$DOMAIN_DIR"/*
+        echo -e "${GREEN}环境已重置${NC}"
+    else
+        echo -e "${YELLOW}已取消重置操作${NC}"
+    fi
+}
+
+# 主菜单
+main_menu() {
+    while true; do
+        echo -e "\n${GREEN}============== SSL证书管理菜单 ==============${NC}"
+        echo "1）申请 SSL 证书"
+        echo "2）重置环境（清除申请记录并重新部署）"
+        echo "3）退出"
+        echo -e "${GREEN}============================================${NC}"
+        
+        read -p "请选择操作 (1-3): " choice
+        
+        case $choice in
+            1)
+                request_certificate
+                ;;
+            2)
+                reset_environment
+                ;;
+            3)
+                echo -e "${GREEN}感谢使用，再见！${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}无效的选择，请重试${NC}"
+                ;;
+        esac
+    done
+}
+
+# 主程序
+check_root
+setup_directories
+main_menu 
