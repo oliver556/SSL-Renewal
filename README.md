@@ -22,13 +22,15 @@
 
 ## 安装方法
 
-### 方式一：一键安装（需要root权限）
+### 方式一：一键安装
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/oliver556/SSL-Renewal/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/oliver556/SSL-Renewal/main/install.sh)
 ```
 
-### 方式二：克隆仓库后安装（需要root权限）
+如果当前不是 root 用户，脚本会自动提示使用 sudo 或切换到 root 用户。
+
+### 方式二：克隆仓库后安装
 
 1. 克隆仓库：
 ```bash
@@ -38,16 +40,22 @@ cd SSL-Renewal
 
 2. 运行安装脚本：
 ```bash
-sudo ./install.sh
+./install.sh
 ```
 
-注意：安装脚本必须使用root权限运行，否则会提示错误并退出。
+注意：安装脚本会自动检查 root 权限，如果不是 root 用户会提示相应的操作方式。
 
 ## 使用方法
 
 运行主程序：
+如果当前不是 root 用户：
 ```bash
 sudo ssl-manager
+```
+
+如果已经是 root 用户：
+```bash
+ssl-manager
 ```
 
 ### 证书申请

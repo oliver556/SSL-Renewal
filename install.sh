@@ -67,10 +67,11 @@ setup_directories() {
     chmod 755 /etc/ssl/domains
 }
 
-# 复制主脚本
-copy_main_script() {
-    echo -e "${GREEN}正在安装主脚本...${NC}"
-    cp ssl-manager /usr/local/bin/ssl-manager
+# 下载并安装主脚本
+install_main_script() {
+    echo -e "${GREEN}正在下载并安装主脚本...${NC}"
+    # 下载主脚本
+    curl -fsSL https://raw.githubusercontent.com/oliver556/SSL-Renewal/main/ssl-manager -o /usr/local/bin/ssl-manager
     chmod +x /usr/local/bin/ssl-manager
 }
 
@@ -79,7 +80,7 @@ echo -e "${GREEN}开始安装 SSL 证书管理工具...${NC}"
 install_dependencies
 install_acme
 setup_directories
-copy_main_script
+install_main_script
 
 echo -e "${GREEN}安装完成！${NC}"
 echo -e "现在你可以通过运行 ${YELLOW}ssl-manager${NC} 来管理 SSL 证书" 
