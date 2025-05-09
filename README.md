@@ -25,14 +25,14 @@
 ### 方式一：一键安装（需要root权限）
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/yourusername/SSL-Renewal/main/install.sh)
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/oliver556/SSL-Renewal/main/install.sh)
 ```
 
 ### 方式二：克隆仓库后安装（需要root权限）
 
 1. 克隆仓库：
 ```bash
-git clone https://github.com/yourusername/SSL-Renewal.git
+git clone https://github.com/oliver556/SSL-Renewal.git
 cd SSL-Renewal
 ```
 
